@@ -133,6 +133,57 @@ app.post('/tts', async (req, res) => {
   }
 });
 
+app.post('/office-tts', async (req, res) => {
+  try {
+    const { text, cacheKey } = req.body;
+    if (!text || !cacheKey) return res.status(400).json({ error: 'text and cacheKey required' });
+
+    const elevenLabsKey = process.env.ELEVEN_LABS_API_KEY;
+
+    // Check cache by date key
+    const cached = await checkCache(cacheKey);
+    if (cached) return res.json({ url: cached, cached: true });
+
+    // Generate with Office voice — more reverent settings than characters
+    const officeVoiceId = 'RTFg9niKcgGLDwa3RFlz';
+    const elevenRes = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${officeVoiceId}`,
+      {
+        method: 'POST',
+        headers: {
+          'xi-api-key': elevenLabsKey,
+          'Content-Type': 'application/json',
+          'Accept': 'audio/mpeg'
+        },
+        body: JSON.stringify({
+          text: text.trim(),
+          model_id: 'eleven_v3',
+          voice_settings: {
+            stability: 0.80,
+            similarity_boost: 0.75,
+            style: 0.20,
+            use_speaker_boost: true,
+            speed: 0.78
+          }
+        })
+      }
+    );
+
+    if (!elevenRes.ok) throw new Error(`ElevenLabs error: ${await elevenRes.text()}`);
+
+    const audioBuffer = await elevenRes.arrayBuffer();
+    const audioBase64 = Buffer.from(audioBuffer).toString('base64');
+
+    saveCache(cacheKey, audioBuffer, 'office').catch(console.error);
+
+    res.json({ audio: audioBase64, cached: false });
+
+  } catch (err) {
+    console.error('Office TTS error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 const PORT = process.env.PORT || 3000;
