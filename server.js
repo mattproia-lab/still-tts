@@ -20,7 +20,7 @@ const COST_PER_1000_CHARS_CENTS = 20;   // ← VERIFY against your ElevenLabs pl
 // ─────────────────────────────────────────────────────────────────────────────
 
 const VOICE_IDS = {
-  companion:  'ePiPWpzcHZrcqRzFrgQg',
+  companion:  'wyWA56cQNU2KqUW4eCsI',
   ammaSophia: 'Y5JXXvUD3rmjDInkLVA2',
   deeper:     'DzcRs71mIqvZ5truEdVC'
 };
