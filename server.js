@@ -40,6 +40,10 @@ async function checkCache(textHash) {
 async function saveCache(textHash, audioBuffer, character) {
   try {
     const serviceKey = process.env.SUPABASE_SERVICE_KEY;
+    if (!serviceKey) {
+      console.error('Cache save skipped: SUPABASE_SERVICE_KEY is not set');
+      return;
+    }
     const fileName = `${textHash}-${Date.now()}.mp3`;
     const uploadRes = await fetch(
       `${SUPA_URL}/storage/v1/object/voice-audio/${fileName}`,
@@ -54,9 +58,12 @@ async function saveCache(textHash, audioBuffer, character) {
         body: audioBuffer
       }
     );
-    if (!uploadRes.ok) return;
+    if (!uploadRes.ok) {
+      console.error('Storage upload failed:', uploadRes.status, await uploadRes.text());
+      return;
+    }
     const audioUrl = `${SUPA_URL}/storage/v1/object/public/voice-audio/${fileName}`;
-    await fetch(`${SUPA_URL}/rest/v1/voice_cache`, {
+    const insertRes = await fetch(`${SUPA_URL}/rest/v1/voice_cache`, {
       method: 'POST',
       headers: {
         'apikey': serviceKey,
@@ -66,6 +73,9 @@ async function saveCache(textHash, audioBuffer, character) {
       },
       body: JSON.stringify({ text_hash: textHash, audio_url: audioUrl, character })
     });
+    if (!insertRes.ok) {
+      console.error('voice_cache insert failed:', insertRes.status, await insertRes.text());
+    }
   } catch(e) { console.error('Cache save error:', e.message); }
 }
 
