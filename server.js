@@ -8,14 +8,39 @@ app.use(express.json());
 
 const SUPA_URL = 'https://zbskapivansfewegllnz.supabase.co';
 
-function hashText(text) {
-  let hash = 0;
-  for (let i = 0; i < text.length; i++) {
-    const char = text.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash).toString(36);
+// ElevenLabs v4 — prayer voice settings.
+// v4 accepts only stability and similarity_boost (no speed, no style, no SSML).
+const TTS_MODEL = 'eleven_v4';
+const PRAYER_VOICE_ID = '3TStB8f3X3To0Uj5R7RK';
+const PRAYER_VOICE_SETTINGS = { stability: 0.80, similarity_boost: 0.75 };
+
+// v4 ignores SSML <break> tags, so convert any that arrive from the app
+// into v4 audio tags: 1.2s or longer becomes a long pause, shorter a pause.
+function toV4Pauses(text) {
+  return text.replace(/<break\s+time="([\d.]+)s"\s*\/>/gi, function (_, secs) {
+    return parseFloat(secs) >= 1.2 ? ' [long pause] ' : ' [pause] ';
+  });
+}
+
+async function generateSpeech(text) {
+  const elevenRes = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${PRAYER_VOICE_ID}`,
+    {
+      method: 'POST',
+      headers: {
+        'xi-api-key': process.env.ELEVEN_LABS_API_KEY,
+        'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg'
+      },
+      body: JSON.stringify({
+        text,
+        model_id: TTS_MODEL,
+        voice_settings: PRAYER_VOICE_SETTINGS
+      })
+    }
+  );
+  if (!elevenRes.ok) throw new Error(`ElevenLabs error: ${await elevenRes.text()}`);
+  return elevenRes.arrayBuffer();
 }
 
 async function checkCache(textHash) {
@@ -77,8 +102,7 @@ async function saveCache(textHash, audioBuffer, character) {
  * The character voices (Companion, Amma Sophia, Deeper) are now text-only.
  * This route stays for older installed builds: it answers 200 with no audio,
  * so those builds quietly restore the button and keep the text reply on screen.
- * Never return 401/402 here — old builds turn 402 into an "Add audio credit" offer.
- * No ElevenLabs call, so character-voice spending stops here. */
+ * Never return 401/402 here — old builds turn 402 into an "Add audio credit" offer. */
 app.post('/tts', (req, res) => {
   res.status(200).json({
     audio: null,
@@ -94,40 +118,10 @@ app.post('/office-tts', async (req, res) => {
     const { text, cacheKey } = req.body;
     if (!text || !cacheKey) return res.status(400).json({ error: 'text and cacheKey required' });
 
-    const elevenLabsKey = process.env.ELEVEN_LABS_API_KEY;
-
-    // Check cache by date key
     const cached = await checkCache(cacheKey);
     if (cached) return res.json({ url: cached, cached: true });
 
-    // Generate with Office voice — more reverent settings than characters
-    const officeVoiceId = '3TStB8f3X3To0Uj5R7RK';
-    const elevenRes = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${officeVoiceId}`,
-      {
-        method: 'POST',
-        headers: {
-          'xi-api-key': elevenLabsKey,
-          'Content-Type': 'application/json',
-          'Accept': 'audio/mpeg'
-        },
-        body: JSON.stringify({
-          text: text.trim(),
-          model_id: 'eleven_v3',
-          voice_settings: {
-            stability: 0.80,
-            similarity_boost: 0.75,
-            style: 0.20,
-            use_speaker_boost: true,
-            speed: 0.78
-          }
-        })
-      }
-    );
-
-    if (!elevenRes.ok) throw new Error(`ElevenLabs error: ${await elevenRes.text()}`);
-
-    const audioBuffer = await elevenRes.arrayBuffer();
+    const audioBuffer = await generateSpeech(toV4Pauses(text.trim()));
     const audioBase64 = Buffer.from(audioBuffer).toString('base64');
 
     saveCache(cacheKey, audioBuffer, 'office').catch(console.error);
@@ -145,46 +139,17 @@ app.post('/rosary-tts', async (req, res) => {
     const { id, scripture, body } = req.body;
     if (!id || !body) return res.status(400).json({ error: 'id and body required' });
 
-    const elevenLabsKey = process.env.ELEVEN_LABS_API_KEY;
-
     // Cache by meditation id — fixed corpus, generated once ever
     const cacheKey = `rosary-${id}`;
     const cached = await checkCache(cacheKey);
     if (cached) return res.json({ url: cached, cached: true });
 
-    // Scripture, a breath of silence, then the meditation
+    // Scripture, a long pause, then the meditation with short pauses between lines
     const text =
-      (scripture ? scripture.trim() + ' <break time="1.6s" /> ' : '') +
-      body.trim().replace(/\n/g, ' <break time="0.5s" /> ');
+      (scripture ? scripture.trim() + ' [long pause] ' : '') +
+      body.trim().replace(/\n/g, ' [pause] ');
 
-    // Vigils/Office voice — same reverent settings as office-tts
-    const rosaryVoiceId = '3TStB8f3X3To0Uj5R7RK';
-    const elevenRes = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${rosaryVoiceId}`,
-      {
-        method: 'POST',
-        headers: {
-          'xi-api-key': elevenLabsKey,
-          'Content-Type': 'application/json',
-          'Accept': 'audio/mpeg'
-        },
-        body: JSON.stringify({
-          text,
-          model_id: 'eleven_v3',
-          voice_settings: {
-            stability: 0.80,
-            similarity_boost: 0.75,
-            style: 0.20,
-            use_speaker_boost: true,
-            speed: 0.78
-          }
-        })
-      }
-    );
-
-    if (!elevenRes.ok) throw new Error(`ElevenLabs error: ${await elevenRes.text()}`);
-
-    const audioBuffer = await elevenRes.arrayBuffer();
+    const audioBuffer = await generateSpeech(text);
     const audioBase64 = Buffer.from(audioBuffer).toString('base64');
 
     saveCache(cacheKey, audioBuffer, 'rosary').catch(console.error);
